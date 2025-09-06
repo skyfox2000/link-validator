@@ -1,0 +1,16 @@
+[package]
+name = "link-validate"
+version = "0.1.0"
+edition = "2024"
+authors = ["Developer <developer@example.com>"]
+description = "A library to convert async-validator style rules to JSON Schema and validate data"
+license = "MIT"
+repository = "https://github.com/your-username/link-validate"
+readme = "README.md"
+keywords = ["validation", "json-schema", "async-validator", "converter"]
+categories = ["web-programming", "encoding"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+jsonschema = "0.17"
