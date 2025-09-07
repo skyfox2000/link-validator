@@ -55,27 +55,27 @@ link-validate = "0.1"
 
 ## API 文档
 
-### 核心函数
+### 核心类型
 
-#### `compile`
+#### `LinkValidator`
 ```rust
-pub fn compile(schema: &Value) -> Result<LinkValidator, String>
+impl LinkValidator {
+    pub fn new(schema: &Value) -> Result<LinkValidator, String>
+    pub fn validate(&self, data: &Value) -> ValidationResult
+}
 ```
 
-编译 schema 并返回 LinkValidator 验证器。该函数会：
+创建和使用 LinkValidator 验证器。
+
+##### `LinkValidator::new`
+创建 LinkValidator 验证器。该函数会：
 
 1. 自动检测 schema 格式（JSON Schema 或 async-validator 规则）
 2. 如果是 async-validator 规则格式，会自动转换为 JSON Schema
 3. 编译 schema
 4. 返回 LinkValidator 验证器
 
-#### `LinkValidator::validate`
-```rust
-impl LinkValidator {
-    pub fn validate(&self, data: &Value) -> ValidationResult
-}
-```
-
+##### `LinkValidator::validate`
 使用 LinkValidator 验证器验证数据。
 
 ### 参数说明
