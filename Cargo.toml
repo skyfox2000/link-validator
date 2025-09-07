@@ -1,14 +1,15 @@
 [package]
-name = "link-validate"
+name = "link-validator"
 version = "0.1.0"
 edition = "2024"
-authors = ["Developer <developer@example.com>"]
-description = "A library to convert async-validator style rules to JSON Schema and validate data"
+authors = ["alex.hua<skyfox2000@hotmail.com>"]
+description = "A Rust library that use JSON Schema or converts async-validator style validation rules to JSON Schema and validates data. Supports automatic format detection, rule conversion, and data validation with detailed error reporting."
 license = "MIT"
-repository = "https://github.com/your-username/link-validate"
+repository = "https://github.com/skyfox2000/link-validator"
 readme = "README.md"
-keywords = ["validation", "json-schema", "async-validator", "converter"]
-categories = ["web-programming", "encoding"]
+keywords = ["validation", "json-schema", "async-validator", "converter", "data-validation"]
+categories = ["web-programming", "encoding", "data-structures"]
+documentation = "https://docs.rs/link-validator"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

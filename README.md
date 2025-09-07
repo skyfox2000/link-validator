@@ -139,7 +139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "type": "object",
                             "fields": {
                                 "name": {"type": "string", "required": true},
-                                "age": {"type": "integer", "minimum": 0}
+                                "age": {"type": "integer", "min": 0}
                             }
                         }
                     }
@@ -172,7 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 错误格式说明
 
-根据原始 schema 的类型，返回的错误信息格式会有所不同：
+根据原始 schema 的类型，返回的错误信息格式会有所不同，便于快速定位问题：
 
 ### JSON Schema 错误格式
 ```json
@@ -192,6 +192,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     "field": "/field"
   }
 ]
+```
+
+### 错误处理示例
+你可以根据不同的错误格式进行处理：
+
+```rust
+use link_validate::{compile, ValidationResult};
+use serde_json::json;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let schema = json!({
+        "username": {"type": "string", "required": true, "min": 3},
+        "email": {"type": "email", "required": true}
+    });
+    
+    let validator = compile(&schema)?;
+    
+    let data = json!({"username": "jo", "email": "invalid-email"});
+    let result = validator.validate(&data);
+    
+    if !result.is_valid {
+        println!("Validation errors: {:?}", result.errors);
+    }
+    
+    Ok(())
+}
+```
 ```
 
 ## 支持的 async-validator 规则格式
@@ -240,12 +267,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 本库的设计遵循以下原则：
 
-1. **简单易用**：提供简洁的公共接口，隐藏内部实现细节
-2. **自动检测**：自动检测和处理不同的 schema 格式
-3. **格式兼容**：生成符合标准的 JSON Schema，可与其他 JSON Schema 工具配合使用
-4. **错误适配**：根据原始 schema 类型返回相应格式的错误信息
-5. **明确提示**：对于不支持的规则，明确告知用户并输出警告
-6. **性能优化**：提供编译和验证分离的接口，避免重复编译
+1. **简单易用**：提供简洁的公共接口，隐藏内部实现细节，便于快速集成。
+2. **自动检测**：自动识别并处理 JSON Schema 和 async-validator 两种格式，减少用户配置。
+3. **格式兼容**：生成标准的 JSON Schema，方便与其他工具集成。
+4. **错误适配**：根据输入 schema 类型返回对应的错误格式，便于错误处理。
+5. **明确提示**：对不支持的规则输出警告，帮助用户快速理解限制。
+6. **性能优化**：通过编译和验证分离的设计，避免重复编译，提高验证效率。
+7. **可扩展性**：设计上预留扩展点，便于未来支持更多规则格式。
 
 ## 限制
 
@@ -254,7 +282,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 3. 不支持空白字符处理（whitespace）的转换
 4. 不支持值转换（transform）的转换
 
-对于这些不支持的规则，建议在应用层单独处理。
+对于这些不支持的规则，建议在应用层进行额外处理或使用其他工具配合完成。
+
+## 常见问题（FAQ）
+
+### 如何判断输入的 schema 格式？
+库会自动检测 schema 格式，无需手动指定。如果你需要明确判断，可以通过检查 schema 中是否包含 async-validator 特有的字段（如 `fields`、`len` 等）来实现。
+
+### 如何处理不支持的规则？
+对于不支持的规则（如 `validator`），建议在应用层添加额外的验证逻辑，或者使用其他验证工具进行补充。
+
+### 验证失败时如何获取详细的错误信息？
+你可以通过 `ValidationResult` 结构体获取详细的错误信息，并根据错误类型进行相应的处理。
+
+### 如何提高验证性能？
+由于提供了编译和验证分离的接口，你可以复用已编译的 `LinkValidator` 对象，避免重复编译，从而提高性能。
 
 ## 贡献
 

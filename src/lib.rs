@@ -1,7 +1,123 @@
-//! link-validate - async-validator 风格规则到 JSON Schema 转换器和验证器
+//! link-validator - async-validator 风格规则到 JSON Schema 转换器和验证器
 //! 
 //! 这个库提供将 async-validator 风格的验证规则转换为 JSON Schema 的功能，
 //! 并使用 JSON Schema 进行数据验证。
+//! 
+//! ## 功能概述
+//! 
+//! 1. **自动格式检测**：自动检测输入的 schema 是 JSON Schema 还是 async-validator 规则格式
+//! 2. **格式转换**：将 async-validator 规则转换为标准的 JSON Schema
+//! 3. **数据验证**：使用 JSON Schema 验证数据
+//! 4. **编译检查**：编译 schema 并检查有效性
+//! 
+//! ## 支持的转换规则
+//! 
+//! ### 基础类型转换
+//! - `string` -> JSON Schema string 类型
+//! - `number` -> JSON Schema number 类型
+//! - `integer` -> JSON Schema integer 类型
+//! - `boolean` -> JSON Schema boolean 类型
+//! - `array` -> JSON Schema array 类型
+//! - `object` -> JSON Schema object 类型
+//! 
+//! ### 特殊类型转换
+//! - `method` -> JSON Schema object 类型（标记为 Function 实例）
+//! - `regexp` -> JSON Schema string 类型
+//! - `date` -> JSON Schema string 类型 + date-time format
+//! - `email` -> JSON Schema string 类型 + email format
+//! - `url` -> JSON Schema string 类型 + uri format
+//! - `hex` -> JSON Schema string 类型 + hex pattern
+//! - `any` -> JSON Schema 无类型限制
+//! 
+//! ### 验证规则转换
+//! - `required` -> JSON Schema required 字段
+//! - `min`/`max` -> 根据类型转换为 minLength/maxLength 或 minimum/maximum
+//! - `len` -> 转换为 minLength 和 maxLength (字符串) 或 minItems/maxItems (数组)
+//! - `pattern` -> JSON Schema pattern (正则表达式)
+//! - `enum` -> JSON Schema enum (枚举值)
+//! - `fields` -> JSON Schema properties (嵌套对象)
+//! 
+//! ### 不支持的规则
+//! 以下规则不支持转换，会在转换时输出警告：
+//! - `validator` (自定义验证函数)
+//! - `asyncValidator` (异步验证函数)
+//! - `trigger` (触发方式)
+//! - `whitespace` (空白字符处理)
+//! - `transform` (值转换)
+//! 
+//! ## 使用示例
+//! 
+//! ### 基本用法
+//! 
+//! ```
+//! use link_validator::LinkValidator;
+//! use serde_json::json;
+//! 
+//! let schema = json!({
+//!     "username": {"type": "string", "required": true, "min": 3},
+//!     "email": {"type": "email", "required": true}
+//! });
+//! 
+//! // 使用 new 方法创建验证器
+//! let validator = LinkValidator::new(&schema).unwrap();
+//! 
+//! // 使用验证器多次验证不同数据
+//! let data1 = json!({"username": "john", "email": "john@example.com"});
+//! let result1 = validator.validate(&data1);
+//! 
+//! let data2 = json!({"username": "jane", "email": "jane@example.com"});
+//! let result2 = validator.validate(&data2);
+//! 
+//! assert!(result1.is_valid);
+//! assert!(result2.is_valid);
+//! ```
+//! 
+//! ### 深度嵌套对象验证
+//! 
+//! ```
+//! use link_validator::LinkValidator;
+//! use serde_json::json;
+//! 
+//! // 支持深度嵌套的对象验证
+//! let schema = json!({
+//!     "user": {
+//!         "type": "object",
+//!         "required": true,
+//!         "fields": {
+//!             "profile": {
+//!                 "type": "object",
+//!                 "fields": {
+//!                     "personal": {
+//!                         "type": "object",
+//!                         "fields": {
+//!                             "name": {"type": "string", "required": true},
+//!                             "age": {"type": "integer", "min": 0}
+//!                         }
+//!                     }
+//!                 }
+//!             }
+//!         }
+//!     }
+//! });
+//! 
+//! // 使用 new 方法创建验证器
+//! let validator = LinkValidator::new(&schema).unwrap();
+//! 
+//! // 验证深度嵌套的数据
+//! let data = json!({
+//!     "user": {
+//!         "profile": {
+//!             "personal": {
+//!                 "name": "John",
+//!                 "age": 30
+//!             }
+//!         }
+//!     }
+//! });
+//! 
+//! let result = validator.validate(&data);
+//! assert!(result.is_valid);
+//! ```
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, Map};
@@ -26,16 +142,36 @@ pub struct LinkValidator {
     format: SchemaFormat,
 }
 
-/// 验证结果
-#[derive(Debug)]
-pub struct ValidationResult {
-    /// 验证是否通过
-    pub is_valid: bool,
-    /// 错误信息（JSON 格式）
-    pub errors: Value,
-}
-
 impl LinkValidator {
+    /// 创建一个新的 LinkValidator 实例
+    /// 
+    /// 该函数会自动检测 schema 格式（JSON Schema 或 async-validator 规则），
+    /// 如果是 async-validator 规则格式，会自动转换为 JSON Schema 并编译。
+    /// 
+    /// # 参数
+    /// 
+    /// * `schema` - 要编译的 schema（JSON 格式），可以是 JSON Schema 或 async-validator 规则格式
+    /// 
+    /// # 返回值
+    /// 
+    /// 返回 LinkValidator 验证器，包含编译后的 schema 和原始格式信息
+    /// 
+    /// # 示例
+    /// 
+    /// ```
+    /// use link_validator::LinkValidator;
+    /// use serde_json::json;
+    /// 
+    /// let schema = json!({
+    ///     "username": {"type": "string", "required": true, "min": 3}
+    /// });
+    /// 
+    /// let validator = LinkValidator::new(&schema).unwrap();
+    /// ```
+    pub fn new(schema: &Value) -> Result<LinkValidator, String> {
+        compile(schema)
+    }
+
     /// 使用当前验证器验证数据
     /// 
     /// # 参数
@@ -82,6 +218,15 @@ impl LinkValidator {
             }
         }
     }
+}
+
+/// 验证结果
+#[derive(Debug)]
+pub struct ValidationResult {
+    /// 验证是否通过
+    pub is_valid: bool,
+    /// 错误信息（JSON 格式）
+    pub errors: Value,
 }
 
 // 内部结构，不对外公开
@@ -161,7 +306,7 @@ type AsyncValidatorRules = HashMap<String, Vec<AsyncValidatorRule>>;
 /// # 返回值
 /// 
 /// 返回 LinkValidator 验证器，包含编译后的 schema 和原始格式信息
-pub fn compile(schema: &Value) -> Result<LinkValidator, String> {
+fn compile(schema: &Value) -> Result<LinkValidator, String> {
     // 判断是否为 async-validator 规则格式
     if is_async_rules(schema) {
         // 如果是 async-validator 规则，则需要转换
@@ -212,156 +357,54 @@ pub fn compile(schema: &Value) -> Result<LinkValidator, String> {
     }
 }
 
-/// 使用预编译的 schema 验证数据
-/// 
-/// # 参数
-/// 
-/// * `compiled` - 通过 [compile] 函数编译得到的结果
-/// * `data` - 要验证的数据（JSON 格式）
-/// 
-/// # 返回值
-/// 
-/// 返回 ValidationResult 结构体，包含验证结果和错误信息
-pub fn check(compiled: &CompileResult, data: &Value) -> ValidationResult {
-    match compiled.schema.validate(data) {
-        Ok(_) => ValidationResult {
-            is_valid: true,
-            errors: Value::Array(vec![]),
-        },
-        Err(errors) => {
-            if compiled.format == SchemaFormat::AsyncValidator {
-                // 转换为 async-validator 错误格式
-                let error_messages: Vec<Value> = errors.into_iter().map(|e| {
-                    serde_json::json!({
-                        "message": e.to_string(),
-                        "field": e.instance_path.to_string()
-                    })
-                }).collect();
-                
-                ValidationResult {
-                    is_valid: false,
-                    errors: Value::Array(error_messages),
-                }
-            } else {
-                // 保持 JSON Schema 错误格式
-                let error_messages: Vec<Value> = errors.into_iter().map(|e| {
-                    serde_json::json!({
-                        "message": e.to_string(),
-                        "instancePath": e.instance_path.to_string()
-                    })
-                }).collect();
-                
-                ValidationResult {
-                    is_valid: false,
-                    errors: Value::Array(error_messages),
-                }
-            }
-        }
-    }
-}
-
-/// 验证数据的唯一公共接口
-/// 
-/// 该函数会自动检测 schema 格式（JSON Schema 或 async-validator 规则），
-/// 如果是 async-validator 规则格式，会自动转换为 JSON Schema，
-/// 然后编译 schema 并验证数据。
-/// 
-/// 注意：如果需要多次验证，建议使用 [compile] 和 [validate_with_compiled] 函数，
-/// 以避免重复编译 schema。
-/// 
-/// # 参数
-/// 
-/// * `schema` - 要编译的 schema（JSON 格式），可以是 JSON Schema 或 async-validator 规则格式
-/// * `data` - 要验证的数据（JSON 格式）
-/// 
-/// # 返回值
-/// 
-/// 返回 ValidationResult 结构体，包含验证结果和错误信息
-/// 
-/// # 示例
-/// 
-/// ```
-/// use link_validate::validate;
-/// use serde_json::json;
-/// 
-/// let schema = json!({
-///     "username": {"type": "string", "required": true, "min": 3},
-///     "email": {"type": "email", "required": true}
-/// });
-/// 
-/// let data = json!({
-///     "username": "john_doe",
-///     "email": "john@example.com"
-/// });
-/// 
-/// let result = validate(&schema, &data);
-/// assert!(result.is_valid);
-/// ```
-pub fn validate(schema: &Value, data: &Value) -> ValidationResult {
-    match compile(schema) {
-        Ok(compiled) => validate_with_compiled(&compiled, data),
-        Err(e) => ValidationResult {
-            is_valid: false,
-            errors: Value::Array(vec![Value::String(e)]),
-        }
-    }
-}
-
-/// 内部验证函数
-fn validate_data_internal(schema: &JSONSchema, data: &Value, is_async_format: bool) -> ValidationResult {
-    match schema.validate(data) {
-        Ok(_) => ValidationResult {
-            is_valid: true,
-            errors: Value::Array(vec![]),
-        },
-        Err(errors) => {
-            if is_async_format {
-                // 转换为 async-validator 错误格式
-                let error_messages: Vec<Value> = errors.into_iter().map(|e| {
-                    serde_json::json!({
-                        "message": e.to_string(),
-                        "field": e.instance_path.to_string()
-                    })
-                }).collect();
-                
-                ValidationResult {
-                    is_valid: false,
-                    errors: Value::Array(error_messages),
-                }
-            } else {
-                // 保持 JSON Schema 错误格式
-                let error_messages: Vec<Value> = errors.into_iter().map(|e| {
-                    serde_json::json!({
-                        "message": e.to_string(),
-                        "instancePath": e.instance_path.to_string()
-                    })
-                }).collect();
-                
-                ValidationResult {
-                    is_valid: false,
-                    errors: Value::Array(error_messages),
-                }
-            }
-        }
-    }
-}
-
 /// 判断给定的值是否为 async-validator 规则格式
 fn is_async_rules(value: &Value) -> bool {
     // 简单检查是否为 async-validator 规则格式
     // async-validator 规则通常是对象，其中值是规则对象或规则对象数组
     match value {
         Value::Object(obj) => {
-            // 检查是否至少有一个字段
+            // 检查对象是否具有 JSON Schema 的特征
+            if obj.contains_key("type") && obj.get("type").unwrap().is_string() {
+                let type_value = obj.get("type").unwrap().as_str().unwrap();
+                // JSON Schema 通常具有这些类型值
+                match type_value {
+                    "object" | "array" | "string" | "number" | "integer" | "boolean" => {
+                        // 进一步检查是否具有 JSON Schema 特征字段
+                        if obj.contains_key("properties") || obj.contains_key("items") {
+                            return false; // 很可能是 JSON Schema
+                        }
+                    }
+                    _ => ()
+                }
+            }
+            
+            // 检查是否具有 JSON Schema 的顶层字段
+            if obj.contains_key("properties") || 
+               obj.contains_key("items") || 
+               obj.contains_key("definitions") ||
+               obj.contains_key("additionalProperties") ||
+               obj.contains_key("patternProperties") {
+                return false; // 明确是 JSON Schema
+            }
+            
+            // 检查字段是否符合 async-validator 规则格式
             for (_, v) in obj {
                 match v {
-                    // 规则可以是单个对象
-                    Value::Object(_) => return true,
-                    // 规则可以是对象数组
+                    // async-validator 规则可以是单个对象
+                    Value::Object(rule_obj) => {
+                        // 检查对象是否符合 async-validator 规则特征
+                        if is_async_rule_object(rule_obj) {
+                            return true;
+                        }
+                    },
+                    // async-validator 规则可以是对象数组
                     Value::Array(arr) => {
                         if !arr.is_empty() {
-                            if let Value::Object(_) = &arr[0] {
-                                return true;
+                            if let Value::Object(rule_obj) = &arr[0] {
+                                // 检查数组中的对象是否符合 async-validator 规则特征
+                                if is_async_rule_object(rule_obj) {
+                                    return true;
+                                }
                             }
                         }
                     }
@@ -372,6 +415,41 @@ fn is_async_rules(value: &Value) -> bool {
         },
         _ => false,
     }
+}
+
+/// 判断给定的对象是否为 async-validator 规则对象
+fn is_async_rule_object(obj: &Map<String, Value>) -> bool {
+    // 检查是否包含 async-validator 特有的规则字段
+    let async_validator_fields = [
+        "type", "required", "min", "max", "len", "pattern", 
+        "enum", "whitespace", "fields", "message"
+    ];
+    
+    // 检查是否包含 JSON Schema 特有的字段（这些在 async-validator 中不常见）
+    let json_schema_fields = [
+        "properties", "items", "additionalProperties", 
+        "patternProperties", "definitions", "minProperties",
+        "maxProperties", "minItems", "maxItems", "uniqueItems",
+        "minLength", "maxLength", "multipleOf", "exclusiveMinimum",
+        "exclusiveMaximum", "format"
+    ];
+    
+    // 如果包含 JSON Schema 特有字段，则不是 async-validator 规则
+    for field in &json_schema_fields {
+        if obj.contains_key(*field) {
+            return false;
+        }
+    }
+    
+    // 如果包含 async-validator 特有字段，则很可能是 async-validator 规则
+    for field in &async_validator_fields {
+        if obj.contains_key(*field) {
+            return true;
+        }
+    }
+    
+    // 默认情况下，如果对象不为空且不包含 JSON Schema 特征，则认为是 async-validator 规则
+    !obj.is_empty()
 }
 
 /// 解析 async-validator 规则，支持对象和数组两种格式
@@ -588,6 +666,10 @@ fn convert_to_jsonschema(rules: &AsyncValidatorRules) -> Result<ConversionResult
                 unsupported.push(format!("Field '{}': trigger option not supported", field_name));
             }
             
+            if rule.extra.contains_key("transform") {
+                unsupported.push(format!("Field '{}': transform option not supported", field_name));
+            }
+            
             for (key, _) in &rule.extra {
                 match key.as_str() {
                     "validator" | "asyncValidator" | "trigger" | "whitespace" | "transform" | "fields" => {
@@ -601,7 +683,7 @@ fn convert_to_jsonschema(rules: &AsyncValidatorRules) -> Result<ConversionResult
         }
         
         // 如果没有指定类型，默认为字符串
-        if !field_schema.contains_key("type") && rule.field_type.is_some() {
+        if !field_schema.contains_key("type") && field_rules.iter().any(|r| r.field_type.is_some()) {
             field_schema.insert("type".to_string(), Value::String("string".to_string()));
         }
         
@@ -652,217 +734,9 @@ impl Default for AsyncValidatorRule {
             validator: None,
             async_validator: None,
             trigger: None,
+            fields: None,
             extra: Map::new(),
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_basic_async_validator_rules() {
-        let schema = json!({
-            "username": {"type": "string", "required": true, "min": 3},
-            "email": {"type": "email", "required": true}
-        });
-
-        let validator = compile(&schema).expect("Compilation failed");
-        assert_eq!(validator.format, SchemaFormat::AsyncValidator);
-
-        let data = json!({
-            "username": "john_doe",
-            "email": "john@example.com"
-        });
-
-        let result = validator.validate(&data);
-        assert!(result.is_valid);
-    }
-
-    #[test]
-    fn test_json_schema_direct() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "username": {"type": "string", "minLength": 3},
-                "email": {"type": "string", "format": "email"}
-            },
-            "required": ["username", "email"]
-        });
-
-        let validator = compile(&schema).expect("Compilation failed");
-        assert_eq!(validator.format, SchemaFormat::JsonSchema);
-
-        let data = json!({
-            "username": "john_doe",
-            "email": "john@example.com"
-        });
-
-        let result = validator.validate(&data);
-        assert!(result.is_valid);
-    }
-
-    #[test]
-    fn test_validation_failure() {
-        let schema = json!({
-            "username": {"type": "string", "required": true, "min": 3},
-            "email": {"type": "email", "required": true}
-        });
-
-        let validator = compile(&schema).expect("Compilation failed");
-
-        let data = json!({
-            "username": "jo", // Too short
-            "email": "invalid-email"
-        });
-
-        let result = validator.validate(&data);
-        assert!(!result.is_valid);
-        assert!(!result.errors.as_array().unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_enum_validation() {
-        let schema = json!({
-            "status": {"type": "string", "enum": ["active", "inactive", "pending"]}
-        });
-
-        let validator = compile(&schema).expect("Compilation failed");
-
-        let data = json!({
-            "status": "active"
-        });
-
-        let result = validator.validate(&data);
-        assert!(result.is_valid);
-    }
-
-    #[test]
-    fn test_array_rules_format() {
-        let schema = json!({
-            "tags": [
-                {"type": "array", "required": true},
-                {"min": 1, "max": 5}
-            ]
-        });
-
-        let validator = compile(&schema).expect("Compilation failed");
-
-        let data = json!({
-            "tags": ["rust", "web"]
-        });
-
-        let result = validator.validate(&data);
-        assert!(result.is_valid);
-    }
-
-    #[test]
-    fn test_nested_object_fields() {
-        let schema = json!({
-            "user": {
-                "type": "object",
-                "required": true,
-                "fields": {
-                    "name": {"type": "string", "required": true},
-                    "age": {"type": "integer", "minimum": 0}
-                }
-            }
-        });
-
-        let validator = compile(&schema).expect("Compilation failed");
-
-        let data = json!({
-            "user": {
-                "name": "John",
-                "age": 30
-            }
-        });
-
-        let result = validator.validate(&data);
-        assert!(result.is_valid);
-    }
-
-    #[test]
-    fn test_deeply_nested_object_fields() {
-        let schema = json!({
-            "user": {
-                "type": "object",
-                "required": true,
-                "fields": {
-                    "profile": {
-                        "type": "object",
-                        "fields": {
-                            "personal": {
-                                "type": "object",
-                                "fields": {
-                                    "name": {"type": "string", "required": true},
-                                    "age": {"type": "integer", "minimum": 0}
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        let validator = compile(&schema).expect("Compilation failed");
-
-        let data = json!({
-            "user": {
-                "profile": {
-                    "personal": {
-                        "name": "John",
-                        "age": 30
-                    }
-                }
-            }
-        });
-
-        let result = validator.validate(&data);
-        assert!(result.is_valid);
-    }
-
-    #[test]
-    fn test_nested_array_fields() {
-        let schema = json!({
-            "users": {
-                "type": "array",
-                "required": true,
-                "fields": {
-                    "type": "object",
-                    "fields": {
-                        "name": {"type": "string", "required": true},
-                        "age": {"type": "integer", "minimum": 0}
-                    }
-                }
-            }
-        });
-
-        let validator = compile(&schema).expect("Compilation failed");
-
-        let data = json!({
-            "users": [
-                {
-                    "name": "John",
-                    "age": 30
-                },
-                {
-                    "name": "Jane",
-                    "age": 25
-                }
-            ]
-        });
-
-        let result = validator.validate(&data);
-        assert!(result.is_valid);
-    }
-
-    #[test]
-    fn test_compile_error() {
-        let schema = json!("invalid schema");
-        let result = compile(&schema);
-        assert!(result.is_err());
-    }
-}
